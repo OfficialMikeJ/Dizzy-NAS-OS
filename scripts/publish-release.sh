@@ -16,14 +16,18 @@ TAG="v$VERSION"
 NAME="dizzyos-$VERSION"
 OUT="$REPO_DIR/release"
 
-command -v gh >/dev/null || { echo "gh CLI is required: https://cli.github.com"; exit 1; }
-gh auth status >/dev/null 2>&1 || { echo "Run 'gh auth login' first"; exit 1; }
+# The package must be built on Linux (native node_modules), but gh is often
+# only installed on the Windows side when developing under WSL. Windows PATH
+# interop makes gh.exe callable from here, so use whichever exists.
+GH=$(command -v gh || command -v gh.exe || true)
+[ -n "$GH" ] || { echo "gh CLI is required: https://cli.github.com (install in WSL, or on Windows for interop)"; exit 1; }
+"$GH" auth status >/dev/null 2>&1 || { echo "Run 'gh auth login' first"; exit 1; }
 
-SLUG="${GITHUB_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)}"
+SLUG="${GITHUB_REPO:-$("$GH" repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null | tr -d '\r' || true)}"
 [ -n "$SLUG" ] || { echo "Set GITHUB_REPO=owner/name (no git remote detected)"; exit 1; }
 echo "[publish] $SLUG — DizzyOS $VERSION"
 
-if gh release view "$TAG" --repo "$SLUG" >/dev/null 2>&1; then
+if "$GH" release view "$TAG" --repo "$SLUG" >/dev/null 2>&1; then
   echo "[publish] release $TAG already exists. Bump the version or delete it:"
   echo "          gh release delete $TAG --repo $SLUG --yes"
   exit 1
@@ -53,11 +57,12 @@ EOF
 # 3. Publish. manifest.json is what devices poll via the stable
 #    /releases/latest/download/manifest.json URL, so it must be attached.
 echo "[publish] creating $TAG"
-gh release create "$TAG" \
+"$GH" release create "$TAG" \
   "$TARBALL" \
   "$OUT/$NAME.tar.gz.sha256" \
   "$OUT/manifest.json" \
   --repo "$SLUG" \
+  --target main \
   --title "DizzyOS $VERSION" \
   --notes "$BODY"
 
