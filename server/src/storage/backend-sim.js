@@ -94,6 +94,13 @@ export async function syncNow() {
 export async function scrubNow() {
   const state = load();
   if (!state.pool) throw new Error('No pool');
+  // Mirrors the real backend: scrub checks data against parity from a sync.
+  if (!state.pool.lastSync) {
+    throw new Error(
+      'Parity has never been synced, so there is nothing to scrub yet. ' +
+      'Run "Sync now" first — it computes the parity that scrub checks against.',
+    );
+  }
   state.pool.lastScrub = {
     at: new Date().toISOString(),
     durationSec: 4,

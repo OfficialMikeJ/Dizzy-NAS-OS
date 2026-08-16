@@ -18,6 +18,7 @@ import { run, tryRun } from '../util/exec.js';
 import { planPool, validatePlan, pickWriteTarget } from './planner.js';
 
 const META_FILE = path.join(STATE_DIR, 'storage.json');
+const CONTENT_FILE = path.join(STATE_DIR, 'snapraid.content');
 const SNAPRAID_CONF = '/etc/snapraid.conf';
 const DISKS_ROOT = '/mnt/disks';
 const PARITY_MOUNT = '/mnt/parity1';
@@ -120,7 +121,7 @@ export async function createPool({ confirm = false } = {}) {
   const conf = [
     '# Managed by DizzyOS — do not edit',
     `parity ${PARITY_MOUNT}/snapraid.parity`,
-    `content ${STATE_DIR}/snapraid.content`,
+    `content ${CONTENT_FILE}`,
     ...branches.map(b => `content ${b.branch}/.snapraid.content`),
     ...branches.map((b, i) => `data d${i + 1} ${b.branch}`),
     'exclude *.unrecoverable',
@@ -170,7 +171,28 @@ export async function syncNow() {
 }
 
 export async function scrubNow() {
-  return startJob('scrub', ['scrub', '-p', '12', '-o', '10']);
+  requireSynced();
+  // -o 0: an on-demand scrub should verify something now. The weekly timer
+  // keeps -o 10 so it rotates through older blocks instead of re-checking
+  // whatever was just written.
+  return startJob('scrub', ['scrub', '-p', '12', '-o', '0']);
+}
+
+/**
+ * Scrub verifies data against hashes recorded by sync, so it cannot run on a
+ * pool that has never been synced — snapraid exits 1 with "No content file".
+ * Fail early with an explanation instead of surfacing a bare exit code.
+ */
+function requireSynced() {
+  const meta = readMeta();
+  if (!meta.pool) throw new Error('No pool');
+  const synced = meta.pool.lastSync?.result?.startsWith('OK') || fs.existsSync(CONTENT_FILE);
+  if (!synced) {
+    throw new Error(
+      'Parity has never been synced, so there is nothing to scrub yet. ' +
+      'Run "Sync now" first — it computes the parity that scrub checks against.',
+    );
+  }
 }
 
 /* ── helpers ─────────────────────────────────────────────────────────── */
@@ -191,7 +213,11 @@ function startJob(type, args) {
     if (m.pool) {
       const record = {
         at: job.finishedAt,
-        result: code === 0 ? `OK (snapraid ${type} exit 0)` : `FAILED — exit ${code}, see ${logFile}`,
+        result: code === 0 ? `OK (snapraid ${type} exit 0)` : `FAILED — exit ${code}`,
+        // Keep the tail so the dashboard can show WHY it failed; an exit code
+        // alone means an SSH session to find out anything useful.
+        log: code === 0 ? null : tailOf(logFile, 15),
+        logFile,
       };
       if (type === 'sync') m.pool.lastSync = record;
       else m.pool.lastScrub = record;
@@ -199,6 +225,14 @@ function startJob(type, args) {
     }
   });
   return jobStatus();
+}
+
+function tailOf(file, lines) {
+  try {
+    return fs.readFileSync(file, 'utf8').trim().split('\n').slice(-lines).join('\n');
+  } catch {
+    return null;
+  }
 }
 
 function jobStatus() {
@@ -274,7 +308,11 @@ function installTimers() {
     ],
     'dizzy-snapraid-scrub.service': [
       '[Unit]', 'Description=DizzyOS SnapRAID weekly scrub (silent-corruption check)',
-      '[Service]', 'Type=oneshot', 'ExecStart=/usr/bin/snapraid scrub -p 12 -o 10', 'Nice=10', 'IOSchedulingClass=idle',
+      '[Service]', 'Type=oneshot',
+      // Skip cleanly until the first sync exists — scrub has nothing to
+      // compare against before then, and a failed unit every week is noise.
+      `ExecCondition=/usr/bin/test -f ${CONTENT_FILE}`,
+      'ExecStart=/usr/bin/snapraid scrub -p 12 -o 10', 'Nice=10', 'IOSchedulingClass=idle',
     ],
     'dizzy-snapraid-scrub.timer': [
       '[Unit]', 'Description=Weekly SnapRAID scrub, Sunday 04:00',

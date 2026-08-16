@@ -101,17 +101,25 @@ export default function Storage() {
             </p>
 
             <h2>SnapRAID protection</h2>
+            {!pool.lastSync && (
+              <div className="info-box">
+                <strong>Parity has not been synced yet.</strong> Your files are pooled and readable,
+                but they are not protected against a drive failure until the first sync finishes.
+                Scrub stays unavailable until then — it verifies data against parity, so it needs
+                parity to exist first.
+              </div>
+            )}
             <table>
               <tbody>
                 <tr>
                   <td>Parity sync</td>
                   <td>{pool.schedule?.sync}</td>
-                  <td>{pool.lastSync ? `last: ${new Date(pool.lastSync.at).toLocaleString()} — ${pool.lastSync.result}` : 'never run'}</td>
+                  <td><JobResult job={pool.lastSync} /></td>
                 </tr>
                 <tr>
                   <td>Data scrub</td>
                   <td>{pool.schedule?.scrub}</td>
-                  <td>{pool.lastScrub ? `last: ${new Date(pool.lastScrub.at).toLocaleString()} — ${pool.lastScrub.result}` : 'never run'}</td>
+                  <td><JobResult job={pool.lastScrub} /></td>
                 </tr>
               </tbody>
             </table>
@@ -124,8 +132,17 @@ export default function Storage() {
             )}
 
             <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-              <button className="btn" onClick={syncNow} disabled={busy || pool.job?.running}>Sync now</button>
-              <button className="btn ghost" onClick={scrubNow} disabled={busy || pool.job?.running}>Scrub now</button>
+              <button className="btn" onClick={syncNow} disabled={busy || pool.job?.running}>
+                {pool.lastSync ? 'Sync now' : 'Run first sync'}
+              </button>
+              <button
+                className="btn ghost"
+                onClick={scrubNow}
+                disabled={busy || pool.job?.running || !pool.lastSync}
+                title={pool.lastSync ? 'Verify data against parity' : 'Run a parity sync first'}
+              >
+                Scrub now
+              </button>
               <button className="btn danger" onClick={destroyPool} disabled={busy || pool.job?.running} style={{ marginLeft: 'auto' }}>
                 Remove pool
               </button>
@@ -156,6 +173,26 @@ export default function Storage() {
             )}
           </div>
         </>
+      )}
+    </>
+  );
+}
+
+/** Last run of a snapraid job, including why it failed. */
+function JobResult({ job }) {
+  if (!job) return <span className="muted">never run</span>;
+  const failed = !job.result?.startsWith('OK');
+  return (
+    <>
+      <span>{new Date(job.at).toLocaleString()} — {job.result}</span>
+      {failed && job.log && (
+        <details style={{ marginTop: 4 }}>
+          <summary className="muted" style={{ cursor: 'pointer', fontSize: 12 }}>show error output</summary>
+          <pre className="mono" style={{ whiteSpace: 'pre-wrap', margin: '6px 0 0' }}>{job.log}</pre>
+        </details>
+      )}
+      {failed && job.logFile && (
+        <div className="muted" style={{ fontSize: 11 }}>full log: <span className="mono">{job.logFile}</span></div>
       )}
     </>
   );
