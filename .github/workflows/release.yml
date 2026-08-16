@@ -4,10 +4,17 @@ name: Publish DizzyOS release
 # checks in afterwards is offered the new version.
 #
 #   git tag v0.3.0 && git push origin v0.3.0
+#
+# Manual runs take the tag as an input, because the version check and the
+# published artifact names all derive from it.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and publish (e.g. v0.3.0)'
+        required: true
 
 permissions:
   contents: write
@@ -15,8 +22,16 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      SLUG: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          # Full history: release notes are derived from the commits since the
+          # previous tag, which a shallow clone cannot see.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -25,9 +40,8 @@ jobs:
       - name: Verify the tag matches server/package.json
         run: |
           PKG=$(node -p "require('./server/package.json').version")
-          TAG="${GITHUB_REF_NAME#v}"
-          if [ "$PKG" != "$TAG" ]; then
-            echo "Tag $TAG does not match package.json version $PKG"
+          if [ "$PKG" != "${TAG#v}" ]; then
+            echo "Tag ${TAG#v} does not match package.json version $PKG"
             exit 1
           fi
           echo "VERSION=$PKG" >> "$GITHUB_ENV"
@@ -37,7 +51,7 @@ jobs:
 
       - name: Build release package
         env:
-          RELEASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/dizzyos-${{ env.VERSION }}.tar.gz
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag || github.ref_name }}/dizzyos-${{ env.VERSION }}.tar.gz
         run: |
           chmod +x scripts/make-release.sh
           ./scripts/make-release.sh
@@ -45,8 +59,6 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-          SLUG: ${{ github.repository }}
         run: |
           FILES="release/dizzyos-$VERSION.tar.gz release/dizzyos-$VERSION.tar.gz.sha256 release/manifest.json"
           # Creating a release from a workstation also creates the tag, which
@@ -68,8 +80,6 @@ jobs:
       - name: Verify the published manifest matches the package
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-          SLUG: ${{ github.repository }}
         run: |
           # A device trusts manifest.sha256 to validate its download; if these
           # ever drift, every install fails the checksum. Prove it here.
