@@ -41,17 +41,44 @@ jobs:
         run: |
           chmod +x scripts/make-release.sh
           ./scripts/make-release.sh
-          cd release
-          sha256sum "dizzyos-$VERSION.tar.gz" > "dizzyos-$VERSION.tar.gz.sha256"
 
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          SLUG: ${{ github.repository }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            "release/dizzyos-$VERSION.tar.gz" \
-            "release/dizzyos-$VERSION.tar.gz.sha256" \
-            "release/manifest.json" \
-            --repo "${{ github.repository }}" \
-            --title "DizzyOS $VERSION" \
-            --generate-notes
+          FILES="release/dizzyos-$VERSION.tar.gz release/dizzyos-$VERSION.tar.gz.sha256 release/manifest.json"
+          # Creating a release from a workstation also creates the tag, which
+          # triggers this workflow — so publishing must be idempotent rather
+          # than failing with "a release with the same tag name already exists".
+          # Assets are replaced together so manifest.json and the package it
+          # checksums can never disagree.
+          if gh release view "$TAG" --repo "$SLUG" >/dev/null 2>&1; then
+            echo "Release $TAG exists — refreshing its assets"
+            gh release upload "$TAG" $FILES --repo "$SLUG" --clobber
+          else
+            gh release create "$TAG" $FILES \
+              --repo "$SLUG" \
+              --target main \
+              --title "DizzyOS $VERSION" \
+              --generate-notes
+          fi
+
+      - name: Verify the published manifest matches the package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          SLUG: ${{ github.repository }}
+        run: |
+          # A device trusts manifest.sha256 to validate its download; if these
+          # ever drift, every install fails the checksum. Prove it here.
+          mkdir -p /tmp/verify && cd /tmp/verify
+          gh release download "$TAG" --repo "$SLUG" --clobber \
+            -p "dizzyos-$VERSION.tar.gz" -p manifest.json
+          EXPECTED=$(node -p "require('/tmp/verify/manifest.json').sha256")
+          ACTUAL=$(sha256sum "dizzyos-$VERSION.tar.gz" | cut -d' ' -f1)
+          echo "manifest: $EXPECTED"
+          echo "package : $ACTUAL"
+          [ "$EXPECTED" = "$ACTUAL" ] || { echo "Checksum mismatch — devices could not install this release"; exit 1; }
+          echo "OK — published release is internally consistent"

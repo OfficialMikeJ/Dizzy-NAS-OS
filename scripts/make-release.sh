@@ -42,24 +42,48 @@ tar -czf "$TARBALL" -C "$OUT" "$NAME"
 SHA=$(sha256sum "$TARBALL" | cut -d' ' -f1)
 SIZE=$(du -h "$TARBALL" | cut -f1)
 
-# 5. Manifest — edit "url" to wherever you host the tarball, and "notes"
-cat > "$OUT/manifest.json" <<EOF
-{
-  "version": "$VERSION",
-  "released": "$(date -u +%Y-%m-%d)",
-  "url": "${RELEASE_URL:-https://example.com/dizzyos/$NAME.tar.gz}",
-  "sha256": "$SHA",
-  "notes": [
-    "Describe what changed in this release here."
-  ]
-}
-EOF
+# 5. Release notes. These are what the dashboard shows a NAS owner before
+#    they install, so never ship a placeholder: use $NOTES if given, else
+#    derive them from the commits since the previous tag.
+if [ -n "${NOTES:-}" ]; then
+  NOTE_SRC="$NOTES"
+else
+  PREV_TAG=$(git -C "$REPO" describe --tags --abbrev=0 2>/dev/null || true)
+  RANGE=${PREV_TAG:+$PREV_TAG..HEAD}
+  NOTE_SRC=$(git -C "$REPO" log --no-merges --format='%s' ${RANGE:-HEAD} 2>/dev/null | head -10)
+  [ -n "$NOTE_SRC" ] || NOTE_SRC="Maintenance release"
+fi
+
+# Build the manifest with node so quoting/escaping in notes can't corrupt it.
+NOTES_RAW="$NOTE_SRC" \
+MF_VERSION="$VERSION" \
+MF_URL="${RELEASE_URL:-https://example.com/dizzyos/$NAME.tar.gz}" \
+MF_SHA="$SHA" \
+MF_DATE="$(date -u +%Y-%m-%d)" \
+node -e '
+  const notes = (process.env.NOTES_RAW || "")
+    .split("\n")
+    .map(l => l.replace(/^[-*]\s*/, "").trim())
+    .filter(Boolean);
+  process.stdout.write(JSON.stringify({
+    version: process.env.MF_VERSION,
+    released: process.env.MF_DATE,
+    url: process.env.MF_URL,
+    sha256: process.env.MF_SHA,
+    notes: notes.length ? notes : ["Maintenance release"],
+  }, null, 2) + "\n");
+' > "$OUT/manifest.json"
+
+# Checksum file published alongside, so the package can be verified by hand.
+(cd "$OUT" && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
 
 rm -rf "$STAGE"
 echo
 echo "[release] $TARBALL ($SIZE)"
 echo "[release] sha256: $SHA"
-echo "[release] manifest: $OUT/manifest.json  ← set \"url\" and \"notes\" before publishing"
+echo "[release] manifest: $OUT/manifest.json"
+echo "[release] notes:"
+node -p "require('$OUT/manifest.json').notes.map(n => '            - ' + n).join('\n')"
 echo
 echo "Install it on the NAS without any hosting:"
 echo "  scp $TARBALL dizzy@<nas-ip>:/tmp/"
