@@ -1,0 +1,57 @@
+name: Publish DizzyOS release
+
+# Tag a commit and CI builds + publishes the update package. Every NAS that
+# checks in afterwards is offered the new version.
+#
+#   git tag v0.3.0 && git push origin v0.3.0
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify the tag matches server/package.json
+        run: |
+          PKG=$(node -p "require('./server/package.json').version")
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$PKG" != "$TAG" ]; then
+            echo "Tag $TAG does not match package.json version $PKG"
+            exit 1
+          fi
+          echo "VERSION=$PKG" >> "$GITHUB_ENV"
+
+      - name: Run tests
+        run: cd server && npm install --no-audit --no-fund && npm test
+
+      - name: Build release package
+        env:
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/dizzyos-${{ env.VERSION }}.tar.gz
+        run: |
+          chmod +x scripts/make-release.sh
+          ./scripts/make-release.sh
+          cd release
+          sha256sum "dizzyos-$VERSION.tar.gz" > "dizzyos-$VERSION.tar.gz.sha256"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            "release/dizzyos-$VERSION.tar.gz" \
+            "release/dizzyos-$VERSION.tar.gz.sha256" \
+            "release/manifest.json" \
+            --repo "${{ github.repository }}" \
+            --title "DizzyOS $VERSION" \
+            --generate-notes

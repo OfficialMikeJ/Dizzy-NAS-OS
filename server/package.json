@@ -1,0 +1,18 @@
+{
+  "name": "dizzyos-server",
+  "version": "0.2.0",
+  "description": "DizzyOS NAS backend — system monitor, AnyRaid, shares, container station",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "dockerode": "^4.0.2",
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1",
+    "systeminformation": "^5.23.5"
+  }
+}

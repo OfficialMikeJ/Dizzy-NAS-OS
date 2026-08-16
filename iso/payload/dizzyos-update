@@ -1,0 +1,38 @@
+#!/bin/bash
+# DizzyOS command-line updater — the SSH equivalent of the dashboard button.
+#
+#   sudo dizzyos-update /tmp/dizzyos-0.3.0.tar.gz     install a local package
+#   sudo dizzyos-update https://host/dizzyos-0.3.0.tar.gz
+#   sudo dizzyos-update --rollback                    previous release
+#   dizzyos-update --status                           what's installed
+set -euo pipefail
+
+API=http://127.0.0.1:8480/api/update
+
+usage() { sed -n '2,9p' "$0" | sed 's/^# \?//'; exit 1; }
+[ $# -ge 1 ] || usage
+
+case "$1" in
+  --status)
+    curl -fsS "$API/status" | ${JQ:-python3 -m json.tool}
+    ;;
+  --rollback)
+    curl -fsS -X POST "$API/rollback" -H 'Content-Type: application/json' \
+      -d "{\"confirm\":true${2:+,\"version\":\"$2\"}}" | ${JQ:-python3 -m json.tool}
+    echo "Rolling back — the dashboard will return in a few seconds."
+    ;;
+  -h|--help)
+    usage
+    ;;
+  http://*|https://*)
+    curl -fsS -X POST "$API/apply" -H 'Content-Type: application/json' \
+      -d "{\"url\":\"$1\",\"confirm\":true}" | ${JQ:-python3 -m json.tool}
+    echo "Updating — the dashboard will return in a few seconds."
+    ;;
+  *)
+    [ -f "$1" ] || { echo "No such file: $1"; exit 1; }
+    curl -fsS -X POST "$API/apply" -H 'Content-Type: application/json' \
+      -d "{\"file\":\"$(readlink -f "$1")\",\"confirm\":true}" | ${JQ:-python3 -m json.tool}
+    echo "Updating — the dashboard will return in a few seconds."
+    ;;
+esac

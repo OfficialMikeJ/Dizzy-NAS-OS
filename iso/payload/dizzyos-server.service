@@ -1,0 +1,17 @@
+[Unit]
+Description=DizzyOS NAS web interface and services
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+# Runs the ACTIVE release. Updates flip this symlink and restart the unit,
+# so the path never changes and rollback is a symlink flip back.
+ExecStart=/usr/bin/node /opt/dizzyos/current/server/src/index.js
+WorkingDirectory=/opt/dizzyos/current/server
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+User=root
+
+[Install]
+WantedBy=multi-user.target

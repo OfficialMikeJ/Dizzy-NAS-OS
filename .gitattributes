@@ -1,0 +1,15 @@
+# DizzyOS runs on Linux — every script, unit file and preseed must keep LF
+# endings. A CRLF checkout on Windows would otherwise ship "\r" into the ISO
+# and fail at boot with: bash: $'\r': command not found
+* text=auto eol=lf
+
+*.sh        text eol=lf
+*.service   text eol=lf
+*.cfg       text eol=lf
+*.yml       text eol=lf
+dizzyos-update text eol=lf
+
+*.iso  binary
+*.png  binary
+*.jpg  binary
+*.gz   binary
